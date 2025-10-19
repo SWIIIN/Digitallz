@@ -1,0 +1,473 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Digitallz Keywords Platform - Production Infrastructure'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [staging, production]
+    Description: Environment name
+  
+  DomainName:
+    Type: String
+    Default: digitallz.com
+    Description: Domain name for the application
+  
+  CertificateArn:
+    Type: String
+    Description: ARN of the SSL certificate
+  
+  DatabasePassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: Password for the database
+  
+  RedisPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: Password for Redis
+
+Resources:
+  # VPC and Networking
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-vpc'
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-subnet-1'
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-subnet-2'
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-subnet-1'
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.4.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-subnet-2'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-igw'
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-routes'
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  # Security Groups
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-web-sg'
+      GroupDescription: Security group for web servers
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-web-sg'
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-db-sg'
+      GroupDescription: Security group for database
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref WebSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-db-sg'
+
+  # RDS Database
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS database
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-db-subnet-group'
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub '${AWS::StackName}-database'
+      DBName: digitallz
+      DBInstanceClass: db.t3.micro
+      Engine: postgres
+      EngineVersion: '15.4'
+      MasterUsername: postgres
+      MasterUserPassword: !Ref DatabasePassword
+      AllocatedStorage: 20
+      StorageType: gp2
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      BackupRetentionPeriod: 7
+      MultiAZ: true
+      StorageEncrypted: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-database'
+
+  # ElastiCache Redis
+  RedisSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Subnet group for Redis
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-redis-sg'
+      GroupDescription: Security group for Redis
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref WebSecurityGroup
+
+  Redis:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupId: !Sub '${AWS::StackName}-redis'
+      Description: Redis cluster for caching
+      NodeType: cache.t3.micro
+      Port: 6379
+      NumCacheClusters: 2
+      Engine: redis
+      EngineVersion: '7.0'
+      CacheSubnetGroupName: !Ref RedisSubnetGroup
+      SecurityGroupIds:
+        - !Ref RedisSecurityGroup
+      AtRestEncryptionEnabled: true
+      TransitEncryptionEnabled: true
+      AuthToken: !Ref RedisPassword
+
+  # Application Load Balancer
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${AWS::StackName}-alb'
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref WebSecurityGroup
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  ALBListenerHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+
+  # Target Groups
+  WebTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AWS::StackName}-web-tg'
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${AWS::StackName}-cluster'
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+
+  # ECS Task Definition
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AWS::StackName}-task'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 512
+      Memory: 1024
+      ExecutionRoleArn: !Ref TaskExecutionRole
+      TaskRoleArn: !Ref TaskRole
+      ContainerDefinitions:
+        - Name: frontend
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/digitallz-frontend:latest'
+          PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+          Environment:
+            - Name: NODE_ENV
+              Value: production
+            - Name: NEXT_PUBLIC_API_URL
+              Value: !Sub 'https://${ApplicationLoadBalancer.DNSName}/api'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: frontend
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+        - Name: backend
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/digitallz-backend:latest'
+          PortMappings:
+            - ContainerPort: 3001
+              Protocol: tcp
+          Environment:
+            - Name: NODE_ENV
+              Value: production
+            - Name: DATABASE_URL
+              Value: !Sub 'postgresql://postgres:${DatabasePassword}@${Database.Endpoint.Address}:5432/digitallz'
+            - Name: REDIS_URL
+              Value: !Sub 'redis://:${RedisPassword}@${Redis.RedisEndpoint.Address}:6379'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: backend
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - "node -e \"require('http').get('http://localhost:3001/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })\""
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  # ECS Service
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub '${AWS::StackName}-service'
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 2
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref WebSecurityGroup
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          AssignPublicIp: DISABLED
+      LoadBalancers:
+        - ContainerName: frontend
+          ContainerPort: 3000
+          TargetGroupArn: !Ref WebTargetGroup
+      DependsOn: ALBListener
+
+  # IAM Roles
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ECRAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: '*'
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # CloudWatch Log Group
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/ecs/${AWS::StackName}'
+      RetentionInDays: 30
+
+  # Route 53 Record
+  DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneName: !Sub '${DomainName}.'
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApplicationLoadBalancer.DNSName
+        HostedZoneId: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
+
+Outputs:
+  LoadBalancerDNS:
+    Description: DNS name of the load balancer
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerDNS'
+
+  DatabaseEndpoint:
+    Description: RDS instance endpoint
+    Value: !GetAtt Database.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-DatabaseEndpoint'
+
+  RedisEndpoint:
+    Description: Redis cluster endpoint
+    Value: !GetAtt Redis.RedisEndpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-RedisEndpoint'
+
+  VPCId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCId'

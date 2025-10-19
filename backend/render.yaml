@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: digitallz-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: https://digitallz.com,https://www.digitallz.com
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 900000
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: 100
+      - key: CACHE_TTL
+        value: 3600
+      - key: ENABLE_ANALYTICS
+        value: true
+      - key: ENABLE_CACHING
+        value: true
+      - key: ENABLE_RATE_LIMITING
+        value: true
+      - key: ENABLE_MONITORING
+        value: true
+      - key: ENABLE_LOGGING
+        value: true
+      - key: LOG_LEVEL
+        value: info
+
+databases:
+  - name: digitallz-postgres
+    plan: free
+    databaseName: digitallz
+    user: digitallz_user
+
+  - name: digitallz-redis
+    plan: free
