@@ -1,24 +1,26 @@
-import Redis from 'redis'
+import Redis from 'ioredis'
 import { config } from '../config'
 import { logger } from '../utils/logger'
 
-export class CacheService {
-  private redis: Redis.RedisClientType
+class CacheService {
+  private redis: Redis
 
   constructor() {
-    this.redis = Redis.createClient({
-      url: config.redis.url,
+    this.redis = new Redis({
+      host: config.redis.host,
+      port: config.redis.port,
+      password: config.redis.password,
+      retryDelayOnFailover: 100,
+      maxRetriesPerRequest: 3
     })
 
-    this.redis.on('error', (err) => {
-      logger.error('Redis Client Error:', err)
+    this.redis.on('error', (error) => {
+      logger.error('Erreur Redis:', error)
     })
 
     this.redis.on('connect', () => {
-      logger.info('Redis Client Connected')
+      logger.info('Connexion Redis établie')
     })
-
-    this.redis.connect()
   }
 
   async get(key: string): Promise<any> {
@@ -26,24 +28,28 @@ export class CacheService {
       const value = await this.redis.get(key)
       return value ? JSON.parse(value) : null
     } catch (error) {
-      logger.error(`Error getting cache key ${key}:`, error)
+      logger.error(`Erreur lors de la récupération du cache pour la clé ${key}:`, error)
       return null
     }
   }
 
-  async set(key: string, value: any, ttl: number = 3600): Promise<void> {
+  async set(key: string, value: any, ttlSeconds: number = 3600): Promise<boolean> {
     try {
-      await this.redis.setEx(key, ttl, JSON.stringify(value))
+      await this.redis.setex(key, ttlSeconds, JSON.stringify(value))
+      return true
     } catch (error) {
-      logger.error(`Error setting cache key ${key}:`, error)
+      logger.error(`Erreur lors de la mise en cache pour la clé ${key}:`, error)
+      return false
     }
   }
 
-  async del(key: string): Promise<void> {
+  async del(key: string): Promise<boolean> {
     try {
       await this.redis.del(key)
+      return true
     } catch (error) {
-      logger.error(`Error deleting cache key ${key}:`, error)
+      logger.error(`Erreur lors de la suppression du cache pour la clé ${key}:`, error)
+      return false
     }
   }
 
@@ -52,153 +58,92 @@ export class CacheService {
       const result = await this.redis.exists(key)
       return result === 1
     } catch (error) {
-      logger.error(`Error checking cache key ${key}:`, error)
+      logger.error(`Erreur lors de la vérification de l'existence de la clé ${key}:`, error)
       return false
     }
   }
 
-  async expire(key: string, ttl: number): Promise<void> {
+  async flush(): Promise<boolean> {
     try {
-      await this.redis.expire(key, ttl)
+      await this.redis.flushdb()
+      return true
     } catch (error) {
-      logger.error(`Error setting expiry for cache key ${key}:`, error)
+      logger.error('Erreur lors du vidage du cache:', error)
+      return false
     }
   }
 
-  async flush(): Promise<void> {
-    try {
-      await this.redis.flushAll()
-      logger.info('Cache flushed')
-    } catch (error) {
-      logger.error('Error flushing cache:', error)
-    }
-  }
-
-  async getStats(): Promise<any> {
-    try {
-      const info = await this.redis.info('memory')
-      const keyspace = await this.redis.info('keyspace')
-      
-      return {
-        memory: this.parseRedisInfo(info),
-        keyspace: this.parseRedisInfo(keyspace),
-      }
-    } catch (error) {
-      logger.error('Error getting cache stats:', error)
-      return null
-    }
-  }
-
-  private parseRedisInfo(info: string): any {
-    const lines = info.split('\r\n')
-    const result: any = {}
-    
-    for (const line of lines) {
-      if (line.includes(':')) {
-        const [key, value] = line.split(':')
-        result[key] = value
-      }
-    }
-    
-    return result
-  }
-
-  // Méthodes spécialisées pour les mots-clés
-  async getKeywordData(keyword: string, platform: string): Promise<any> {
-    const key = `keyword:${keyword}:${platform}`
-    return await this.get(key)
-  }
-
-  async setKeywordData(keyword: string, platform: string, data: any, ttl: number = 3600): Promise<void> {
-    const key = `keyword:${keyword}:${platform}`
-    await this.set(key, data, ttl)
-  }
-
-  async getTrends(keyword: string, platform: string, dateRange: string): Promise<any> {
-    const key = `trends:${keyword}:${platform}:${dateRange}`
-    return await this.get(key)
-  }
-
-  async setTrends(keyword: string, platform: string, dateRange: string, data: any, ttl: number = 1800): Promise<void> {
-    const key = `trends:${keyword}:${platform}:${dateRange}`
-    await this.set(key, data, ttl)
-  }
-
-  async getPopularKeywords(platform?: string): Promise<any> {
-    const key = `popular:${platform || 'all'}`
-    return await this.get(key)
-  }
-
-  async setPopularKeywords(platform: string | undefined, data: any, ttl: number = 600): Promise<void> {
-    const key = `popular:${platform || 'all'}`
-    await this.set(key, data, ttl)
-  }
-
-  async getSuggestions(keyword: string, platform: string): Promise<any> {
-    const key = `suggestions:${keyword}:${platform}`
-    return await this.get(key)
-  }
-
-  async setSuggestions(keyword: string, platform: string, data: any, ttl: number = 300): Promise<void> {
-    const key = `suggestions:${keyword}:${platform}`
-    await this.set(key, data, ttl)
-  }
-
-  async getCompetitors(keyword: string, platform: string): Promise<any> {
-    const key = `competitors:${keyword}:${platform}`
-    return await this.get(key)
-  }
-
-  async setCompetitors(keyword: string, platform: string, data: any, ttl: number = 3600): Promise<void> {
-    const key = `competitors:${keyword}:${platform}`
-    await this.set(key, data, ttl)
-  }
-
-  async getDifficulty(keyword: string, platform: string): Promise<any> {
-    const key = `difficulty:${keyword}:${platform}`
-    return await this.get(key)
-  }
-
-  async setDifficulty(keyword: string, platform: string, data: any, ttl: number = 1800): Promise<void> {
-    const key = `difficulty:${keyword}:${platform}`
-    await this.set(key, data, ttl)
-  }
-
-  // Méthodes pour les patterns
-  async getKeysByPattern(pattern: string): Promise<string[]> {
+  async getKeys(pattern: string): Promise<string[]> {
     try {
       return await this.redis.keys(pattern)
     } catch (error) {
-      logger.error(`Error getting keys by pattern ${pattern}:`, error)
+      logger.error(`Erreur lors de la récupération des clés avec le pattern ${pattern}:`, error)
       return []
     }
   }
 
-  async deleteByPattern(pattern: string): Promise<number> {
+  async getTTL(key: string): Promise<number> {
     try {
-      const keys = await this.redis.keys(pattern)
-      if (keys.length === 0) return 0
-      
-      return await this.redis.del(keys)
+      return await this.redis.ttl(key)
     } catch (error) {
-      logger.error(`Error deleting keys by pattern ${pattern}:`, error)
+      logger.error(`Erreur lors de la récupération du TTL pour la clé ${key}:`, error)
+      return -1
+    }
+  }
+
+  async increment(key: string, value: number = 1): Promise<number> {
+    try {
+      return await this.redis.incrby(key, value)
+    } catch (error) {
+      logger.error(`Erreur lors de l'incrémentation pour la clé ${key}:`, error)
       return 0
     }
   }
 
-  // Nettoyage automatique
-  async cleanupExpiredKeys(): Promise<void> {
+  async decrement(key: string, value: number = 1): Promise<number> {
     try {
-      // Supprimer les clés expirées (Redis le fait automatiquement, mais on peut forcer)
-      const expiredKeys = await this.redis.keys('*')
-      for (const key of expiredKeys) {
-        const ttl = await this.redis.ttl(key)
-        if (ttl === -2) { // Clé expirée
-          await this.redis.del(key)
-        }
-      }
+      return await this.redis.decrby(key, value)
     } catch (error) {
-      logger.error('Error cleaning up expired keys:', error)
+      logger.error(`Erreur lors de la décrémentation pour la clé ${key}:`, error)
+      return 0
+    }
+  }
+
+  async hget(hash: string, field: string): Promise<any> {
+    try {
+      const value = await this.redis.hget(hash, field)
+      return value ? JSON.parse(value) : null
+    } catch (error) {
+      logger.error(`Erreur lors de la récupération du hash ${hash} pour le champ ${field}:`, error)
+      return null
+    }
+  }
+
+  async hset(hash: string, field: string, value: any): Promise<boolean> {
+    try {
+      await this.redis.hset(hash, field, JSON.stringify(value))
+      return true
+    } catch (error) {
+      logger.error(`Erreur lors de la mise en cache du hash ${hash} pour le champ ${field}:`, error)
+      return false
+    }
+  }
+
+  async hdel(hash: string, field: string): Promise<boolean> {
+    try {
+      await this.redis.hdel(hash, field)
+      return true
+    } catch (error) {
+      logger.error(`Erreur lors de la suppression du hash ${hash} pour le champ ${field}:`, error)
+      return false
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    try {
+      await this.redis.disconnect()
+    } catch (error) {
+      logger.error('Erreur lors de la déconnexion Redis:', error)
     }
   }
 }

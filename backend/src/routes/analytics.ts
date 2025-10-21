@@ -1,14 +1,17 @@
-import { Router, Request, Response } from 'express'
+import express from 'express'
+import { analyticsController } from '../controllers/analyticsController'
+import { authenticateToken } from '../middleware/auth'
 
-const router = Router()
+const router = express.Router()
 
-// Placeholder analytics routes - to be implemented later
-router.get('/stats', (req: Request, res: Response) => {
-  res.json({ message: 'Analytics stats endpoint - to be implemented' })
-})
+// Toutes les routes nécessitent une authentification
+router.use(authenticateToken)
 
-router.get('/dashboard', (req: Request, res: Response) => {
-  res.json({ message: 'Analytics dashboard endpoint - to be implemented' })
-})
+router.get('/dashboard', analyticsController.getDashboard)
+router.get('/trends', analyticsController.getTrends)
+router.get('/platforms', analyticsController.getPlatformStats)
+router.get('/keywords', analyticsController.getKeywordStats)
+router.get('/performance', analyticsController.getPerformance)
+router.post('/track', analyticsController.trackEvent)
 
 export { router as analyticsRoutes }

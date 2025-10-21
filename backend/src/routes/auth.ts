@@ -1,18 +1,20 @@
-import { Router, Request, Response } from 'express'
+import express from 'express'
+import { authController } from '../controllers/authController'
+import { validateUserRegistration, validateUserLogin } from '../middleware/validation'
 
-const router = Router()
+const router = express.Router()
 
-// Placeholder auth routes - to be implemented later
-router.post('/login', (req: Request, res: Response) => {
-  res.json({ message: 'Login endpoint - to be implemented' })
-})
+// Routes publiques
+router.post('/register', validateUserRegistration, authController.register)
+router.post('/login', validateUserLogin, authController.login)
+router.post('/refresh', authController.refreshToken)
+router.post('/forgot-password', authController.forgotPassword)
+router.post('/reset-password', authController.resetPassword)
 
-router.post('/register', (req: Request, res: Response) => {
-  res.json({ message: 'Register endpoint - to be implemented' })
-})
-
-router.post('/logout', (req: Request, res: Response) => {
-  res.json({ message: 'Logout endpoint - to be implemented' })
-})
+// Routes protégées
+router.post('/logout', authController.logout)
+router.get('/profile', authController.getProfile)
+router.put('/profile', authController.updateProfile)
+router.post('/change-password', authController.changePassword)
 
 export { router as authRoutes }

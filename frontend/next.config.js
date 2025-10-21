@@ -3,15 +3,15 @@ const nextConfig = {
   // experimental: {
   //   appDir: true,
   // },
-  output: 'export',
-  trailingSlash: true,
+  // output: 'export',
+  // trailingSlash: true,
   images: {
     unoptimized: true,
     domains: ['images.unsplash.com', 'via.placeholder.com'],
   },
   env: {
     NEXT_PUBLIC_API_URL: process.env.NODE_ENV === 'production' 
-      ? 'https://digitallz-api.railway.app' 
+      ? 'https://digitallz-backend.onrender.com' 
       : 'http://localhost:3001',
     NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || 'pk_test_placeholder',
   },

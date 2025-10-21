@@ -1,10 +1,12 @@
-import { Router, Request, Response } from 'express'
+import express from 'express'
+import { webhookController } from '../controllers/webhookController'
 
-const router = Router()
+const router = express.Router()
 
-// Placeholder webhook routes - to be implemented later
-router.post('/stripe', (req: Request, res: Response) => {
-  res.json({ message: 'Stripe webhook endpoint - to be implemented' })
-})
+// Routes publiques pour les webhooks
+router.post('/stripe', webhookController.handleStripeWebhook)
+router.post('/amazon', webhookController.handleAmazonWebhook)
+router.post('/etsy', webhookController.handleEtsyWebhook)
+router.post('/ebay', webhookController.handleEbayWebhook)
 
 export { router as webhookRoutes }

@@ -1,14 +1,20 @@
-import { Router, Request, Response } from 'express'
+import express from 'express'
+import { subscriptionController } from '../controllers/subscriptionController'
+import { authenticateToken } from '../middleware/auth'
 
-const router = Router()
+const router = express.Router()
 
-// Placeholder subscription routes - to be implemented later
-router.get('/plans', (req: Request, res: Response) => {
-  res.json({ message: 'Subscription plans endpoint - to be implemented' })
-})
+// Toutes les routes nécessitent une authentification
+router.use(authenticateToken)
 
-router.post('/subscribe', (req: Request, res: Response) => {
-  res.json({ message: 'Subscribe endpoint - to be implemented' })
-})
+router.get('/plans', subscriptionController.getPlans)
+router.get('/current', subscriptionController.getCurrentSubscription)
+router.post('/create', subscriptionController.createSubscription)
+router.post('/upgrade', subscriptionController.upgradeSubscription)
+router.post('/downgrade', subscriptionController.downgradeSubscription)
+router.post('/cancel', subscriptionController.cancelSubscription)
+router.post('/reactivate', subscriptionController.reactivateSubscription)
+router.get('/billing', subscriptionController.getBillingHistory)
+router.post('/webhook', subscriptionController.handleWebhook)
 
 export { router as subscriptionRoutes }
